@@ -11,6 +11,7 @@ param(
     [string]$RedisVolume = $(if ($env:HERMES_REDIS_VOLUME) { $env:HERMES_REDIS_VOLUME } else { "hermesagent_redis_data" }),
     [int]$GatewayPort = $(if ($env:HERMES_GATEWAY_PORT) { [int]$env:HERMES_GATEWAY_PORT } else { 8642 }),
     [int]$DashboardPort = $(if ($env:HERMES_DASHBOARD_PORT) { [int]$env:HERMES_DASHBOARD_PORT } else { 9119 }),
+    [bool]$ExposeHostPorts = $(if ($env:HERMES_EXPOSE_HOST_PORTS) { $env:HERMES_EXPOSE_HOST_PORTS -match "^(1|true|yes)$" } else { $true }),
     [string[]]$GatewayArgs = $(if ($env:HERMES_GATEWAY_ARGS) { $env:HERMES_GATEWAY_ARGS -split " " } else { @("gateway", "run") }),
     [string]$ConfigFile = $(if ($env:HERMES_CONFIG_FILE) { $env:HERMES_CONFIG_FILE } else { Join-Path $PSScriptRoot "hermes.config.env" }),
     [switch]$SkipPull
@@ -57,6 +58,7 @@ function Apply-SettingsFromEnv {
     if ($env:HERMES_REDIS_VOLUME) { $script:RedisVolume = $env:HERMES_REDIS_VOLUME }
     if ($env:HERMES_GATEWAY_PORT) { $script:GatewayPort = [int]$env:HERMES_GATEWAY_PORT }
     if ($env:HERMES_DASHBOARD_PORT) { $script:DashboardPort = [int]$env:HERMES_DASHBOARD_PORT }
+    if ($env:HERMES_EXPOSE_HOST_PORTS) { $script:ExposeHostPorts = $env:HERMES_EXPOSE_HOST_PORTS -match "^(1|true|yes)$" }
     if ($env:HERMES_GATEWAY_ARGS) { $script:GatewayArgs = $env:HERMES_GATEWAY_ARGS -split " " }
     if ($env:HERMES_SKIP_PULL -match "^(1|true|yes)$") { $script:SkipPull = $true }
 }
@@ -188,7 +190,9 @@ function Invoke-DockerRunGateway {
 
     $args = @("run", "-d", "--name", $ContainerName, "--restart", "unless-stopped", "--network", $NetworkName)
     $args += @("-e", "HERMES_DASHBOARD=1")
-    $args += @("-p", "${GatewayPort}:8642", "-p", "${DashboardPort}:9119")
+    if ($ExposeHostPorts) {
+        $args += @("-p", "${GatewayPort}:8642", "-p", "${DashboardPort}:9119")
+    }
     $args += @("-v", "${DataVolume}:/opt/data")
     $args += Get-EnvFileArgs
     $args += @($Image)
@@ -198,8 +202,13 @@ function Invoke-DockerRunGateway {
 
     Write-Host "Hermes has been deployed and started."
     Write-Host "Container: $ContainerName"
-    Write-Host "Gateway:   http://localhost:$GatewayPort"
-    Write-Host "Dashboard: http://localhost:$DashboardPort"
+    if ($ExposeHostPorts) {
+        Write-Host "Gateway:   http://localhost:$GatewayPort"
+        Write-Host "Dashboard: http://localhost:$DashboardPort"
+    } else {
+        Write-Host "Gateway:   http://${ContainerName}:8642 from Docker network $NetworkName"
+        Write-Host "Dashboard: http://${ContainerName}:9119 from Docker network $NetworkName"
+    }
     Write-Host "Data:      docker volume $DataVolume"
     Write-Host "Config:    $ConfigFile"
 }

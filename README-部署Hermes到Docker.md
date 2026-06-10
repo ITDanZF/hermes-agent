@@ -12,13 +12,19 @@
 
 脚本会创建：
 
-- Hermes 容器：`hermes`
+- Hermes 容器：`hermes-agent`
 - Redis 容器：`hermes-redis`
 - Docker 网络：`hermesagent_hermes-net`
 - Hermes 数据卷：`hermesagent_hermes_data`
 - Redis 数据卷：`hermesagent_redis_data`
 
-默认访问地址：
+默认配置适合接入已有 Nginx：
+
+- Nginx 代理 Gateway：`http://hermes-agent:8642`
+- Nginx 代理 Dashboard：`http://hermes-agent:9119`
+- `HERMES_EXPOSE_HOST_PORTS=false` 时，宿主机不会直接暴露 `8642` 和 `9119`
+
+如果要本机直接访问，可以把 `HERMES_EXPOSE_HOST_PORTS=true`，然后使用：
 
 - Gateway：`http://localhost:8642`
 - Dashboard：`http://localhost:9119`
@@ -78,6 +84,32 @@ TELEGRAM_BOT_TOKEN=你的 Telegram Bot Token
 TELEGRAM_ALLOWED_USERS=你的 Telegram 用户 ID
 ```
 
+如果部署到已有 Nginx 后面，请确认：
+
+```env
+HERMES_CONTAINER_NAME=hermes-agent
+HERMES_NETWORK_NAME=你的线上 Nginx 所在 Docker network 名称
+HERMES_EXPOSE_HOST_PORTS=false
+```
+
+对应 Nginx 代理配置中的 Hermes 入口应使用容器内部端口 `8642`：
+
+```nginx
+location /hermes/ {
+	proxy_pass http://hermes-agent:8642/;
+	proxy_http_version 1.1;
+	proxy_set_header Host $host;
+	proxy_set_header X-Real-IP $remote_addr;
+	proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+	proxy_set_header X-Forwarded-Proto $scheme;
+	proxy_set_header Upgrade $http_upgrade;
+	proxy_set_header Connection "upgrade";
+	proxy_connect_timeout 10s;
+	proxy_send_timeout 300s;
+	proxy_read_timeout 300s;
+}
+```
+
 ## 3. 一条命令部署
 
 在 PowerShell 中进入目录：
@@ -97,10 +129,10 @@ cd E:\hermesAgent
 - 读取 `hermes.config.env`
 - 创建 Docker 网络
 - 创建 Docker 数据卷
-- 删除旧的 `hermes` 和 `hermes-redis` 容器
+- 删除旧的 `hermes-agent` 和 `hermes-redis` 容器
 - 重新创建 Redis 容器
 - 重新创建 Hermes 容器
-- 映射 `8642` 和 `9119` 端口
+- 根据 `HERMES_EXPOSE_HOST_PORTS` 决定是否映射 `8642` 和 `9119` 端口
 
 注意：`recreate` 不会删除 Docker volume，所以已有 Hermes 配置和状态会保留。
 
@@ -115,14 +147,14 @@ cd E:\hermesAgent
 期望看到：
 
 ```text
-hermes        Up
+hermes-agent  Up
 hermes-redis  Up
 ```
 
-查看端口：
+如果 `HERMES_EXPOSE_HOST_PORTS=true`，查看端口：
 
 ```powershell
-docker port hermes
+docker port hermes-agent
 ```
 
 期望看到：
@@ -130,6 +162,15 @@ docker port hermes
 ```text
 8642/tcp -> 0.0.0.0:8642
 9119/tcp -> 0.0.0.0:9119
+```
+
+如果 `HERMES_EXPOSE_HOST_PORTS=false`，`docker port hermes-agent` 可以没有输出；这表示 Hermes 只允许同一 Docker network 内的 Nginx 访问。
+
+可以从 Nginx 容器内验证：
+
+```powershell
+docker exec -it 你的nginx容器名 sh
+wget -O- http://hermes-agent:8642/
 ```
 
 查看日志：
@@ -150,13 +191,13 @@ No messaging platforms enabled
 如果你想使用 Hermes 交互式配置模型：
 
 ```powershell
-docker exec -it hermes hermes model
+docker exec -it hermes-agent hermes model
 ```
 
 如果你想使用 Hermes 交互式配置消息平台：
 
 ```powershell
-docker exec -it hermes hermes gateway setup
+docker exec -it hermes-agent hermes gateway setup
 ```
 
 配置完成后重启：
@@ -232,13 +273,13 @@ docker ps
 确认 Hermes 进程状态：
 
 ```powershell
-docker exec hermes sh -lc "cat /opt/data/gateway_state.json"
+docker exec hermes-agent sh -lc "cat /opt/data/gateway_state.json"
 ```
 
 确认 Hermes 配置状态：
 
 ```powershell
-docker exec -it hermes hermes status
+docker exec -it hermes-agent hermes status
 ```
 
 说明：`hermes gateway status` 在 Docker 容器里可能会检查 `systemctl` 用户服务，不适合作为本部署方式的唯一判断标准。请以 Docker 容器状态、日志和 `/opt/data/gateway_state.json` 为准。
